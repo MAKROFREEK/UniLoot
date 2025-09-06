@@ -7,9 +7,12 @@ Stores data in a SQLite database so operations is super light weight robust & ef
 
 # WARNING 
 
-If you stumble across this and want to try it out, use "/unitloot scan" around players already placed containers (barrels/chests/etc)
+If you stumble across this and want to try it out, use "/unitloot scan 1" around players already placed containers (barrels/chests/etc)
+It will scan however many chunks you input i.e. /uniloot scan 3 will scan 3 chunks around you and make those "player placed chests" and the plugin will ignore these.
 Figuring out a better method to sort this issue, but with my limited knowledge and skills this is how it is for now.
 For my small private server just a couple friends it's not issue, but I can see this being a bigger issue for.. bigger servers.
+
+ A full server restart is the only 100% safe way to reload a plugin.
 
 # WARNING
 
