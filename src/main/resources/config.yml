@@ -1,0 +1,88 @@
+#---------------------------------------------------
+#  UniLoot Configuration File
+#---------------------------------------------------
+#  This file controls all the features of the UniLoot plugin.
+#  Use MiniMessage tags for colors and formatting (e.g., <green>, <red>, <bold>).
+#  After making changes, use the command "/uniloot reload" in-game or in the console.
+#---------------------------------------------------
+
+general:
+  #--- General Settings ---
+  #  Enable debug mode to see detailed step-by-step logs in the server console.
+  #  This is very useful for troubleshooting issues with containers or loot tables.
+  #Default: false
+  debug: true
+
+  #  The title of the loot inventory window that opens for players.
+  #Example: "<blue>Treasure Chest</blue>"
+  #Default: "<red>Loot</red>"
+  inventory_title: "<red>Loot</red>"
+
+  #  A list of all container types that UniLoot should manage.
+  #  You must use the official Bukkit Material names.
+  enabled_containers:
+    - 'CHEST'
+    - 'TRAPPED_CHEST'
+    - 'BARREL'
+    - 'SHULKER_BOX'
+
+protection:
+  #--- Container Protection Settings ---
+  #  If true, any container on the list above that has a loot table (or is captured) will be protected.
+  #  Protection prevents breaking by players in survival/adventure and from all explosions.
+  #Default: true
+  enabled: true
+
+  #  If true, players in creative mode can break protected containers after a confirmation.
+  #  This is a safeguard to prevent accidental destruction by admins.
+  #Default: true
+  allow_creative_break: true
+
+  #  How many seconds a creative player has to break the container a second time to confirm.
+  #Default: 10
+  creative_break_confirmation_seconds: 10
+
+loot_refresh:
+  #--- Loot Cooldown Settings ---
+  # Set to true to allow players to re-loot containers after a cooldown period.
+  # If this is false, once a player loots a container, it is permanent for them.
+  # Default: true
+  enabled: true
+
+  # The time a player must wait before looting the same container again.
+  # Use 'h' for hours, 'm' for minutes, 's' for seconds. (e.g., "24h", "30m", "90s")
+  # Default: "24h"
+  refresh_interval: "23h"
+
+messages:
+  #--- Customizable Messages ---
+  first_loot: '<green>You found some loot!</green>'
+  already_looted: '<red>You have already looted this container.</red>'
+  # Placeholders: <hours>, <minutes>, <seconds>
+  loot_on_cooldown: '<gray>You can loot this again in <hours>h <minutes>m <seconds>s.</gray>'
+  break_attempt_survival: '<red>This special container is protected and cannot be broken.</red>'
+  # Placeholder: <time>
+  break_warning_creative: '<yellow><bold>Warning!</bold> This is a protected loot container. Break it again within <time> seconds to permanently destroy it.</yellow>'
+  # New message for the double chest protection
+  place_next_to_loot_chest: '<red>You cannot place a chest next to a loot container.</red>'
+
+fallback_loot:
+  #--- Empty Container Settings ---
+  #  Set to true to generate loot if a container's natural loot table generates nothing.
+  #  This ensures players always get something for exploring.
+  #Default: true
+  enabled: true
+
+  #  The number of random item stacks to generate from the list below if fallback is triggered.
+  #Default: 3
+  items_to_give: 3
+
+  #  List of items that can be generated as fallback loot.
+  #Format: "minecraft:item_name, minAmount-maxAmount, weight"
+  items:
+    - "minecraft:iron_ingot, 2-5, 50"
+    - "minecraft:gold_ingot, 1-4, 40"
+    - "minecraft:diamond, 1-2, 10"
+    - "minecraft:emerald, 1-2, 10"
+    - "minecraft:golden_apple, 1, 5"
+    - "minecraft:netherite_scrap, 1, 1"

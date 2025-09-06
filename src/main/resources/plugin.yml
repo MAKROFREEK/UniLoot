@@ -1,0 +1,25 @@
+name: UniLoot
+version: '1.0'
+main: net.smaa.uniloot.UniLoot
+api-version: '1.21'
+authors: [MAKROFREEK]
+description: Provides per-player loot for all generated containers regardless of any other plugins/custom loot tables etc.
+softdepend: [BetterStructures, WorldGuard]
+folia-supported: true
+
+commands:
+  uniloot:
+    description: Main command for the UniLoot plugin.
+    usage: /<command> <reload|scan>
+    permission: uniloot.command
+
+permissions:
+  uniloot.reload:
+    description: Allows reloading the UniLoot configuration.
+    default: op
+    usage: /<command> reload
+
+  uniloot.scan:
+    description: Allows scanning chunks to protect existing player containers.
+    usage: /<command> scan [radius]
+    default: op
