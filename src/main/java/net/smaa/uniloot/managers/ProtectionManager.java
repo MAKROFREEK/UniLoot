@@ -40,25 +40,26 @@ public class ProtectionManager implements Listener {
         this.data = dataManager;
     }
 
-    // --- Player Placed Block Tracking ---
-
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
         Material blockType = block.getType();
 
-        // --- NEW: Prevent creating double chests with loot containers ---
+        // Prevent creating double chests with loot containers
         if (blockType == Material.CHEST || blockType == Material.TRAPPED_CHEST) {
             for (BlockFace face : ADJACENT_FACES) {
                 Block adjacent = block.getRelative(face);
-                if (adjacent.getType() == blockType && isProtectedContainer(adjacent)) {
-                    event.setCancelled(true);
-                    event.getPlayer().sendMessage(MiniMessage.miniMessage().deserialize(config.getPlaceNextToLootChestMessage()));
-                    return;
+                if (adjacent.getType() == blockType) {
+                    if (isProtectedLootContainer(adjacent)) {
+                        event.setCancelled(true);
+                        event.getPlayer().sendMessage(MiniMessage.miniMessage().deserialize(config.getPlaceNextToLootChestMessage()));
+                        return;
+                    }
                 }
             }
         }
 
+        // Track the placed container so the plugin knows to ignore it
         if (config.getEnabledContainerTypes().contains(blockType)) {
             data.addPlayerPlaced(LocationUtil.getPrimaryLocation(block));
         }
@@ -68,26 +69,23 @@ public class ProtectionManager implements Listener {
     public void onContainerBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         if (config.getEnabledContainerTypes().contains(block.getType())) {
-            // This now clears all data types for the location to prevent ghost data
+            // Clear all data associated with this location to prevent "ghost" loot
             data.clearAllDataForLocation(LocationUtil.getPrimaryLocation(block));
         }
     }
 
-
-    // --- Container Protection Logic ---
-
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockBreakAttempt(BlockBreakEvent event) {
-        if (!config.isProtectionEnabled() || !isProtectedContainer(event.getBlock())) {
-            return;
-        }
+        if (!config.isProtectionEnabled()) return;
 
-        Player player = event.getPlayer();
-        if (player.getGameMode() == GameMode.CREATIVE && config.isCreativeBreakAllowed()) {
-            handleCreativeBreak(player, event.getBlock(), event);
-        } else {
-            event.setCancelled(true);
-            player.sendMessage(MiniMessage.miniMessage().deserialize(config.getBreakAttemptSurvivalMessage()));
+        if (isProtectedLootContainer(event.getBlock())) {
+            Player player = event.getPlayer();
+            if (player.getGameMode() == GameMode.CREATIVE && config.isCreativeBreakAllowed()) {
+                handleCreativeBreak(player, event.getBlock(), event);
+            } else {
+                event.setCancelled(true);
+                player.sendMessage(MiniMessage.miniMessage().deserialize(config.getBreakAttemptSurvivalMessage()));
+            }
         }
     }
 
@@ -97,7 +95,6 @@ public class ProtectionManager implements Listener {
 
         if (creativeBreakConfirmations.containsKey(playerUUID) && creativeBreakConfirmations.get(playerUUID).equals(blockLocation)) {
             creativeBreakConfirmations.remove(playerUUID);
-            // Allow the break to proceed
         } else {
             event.setCancelled(true);
             creativeBreakConfirmations.put(playerUUID, blockLocation);
@@ -113,29 +110,42 @@ public class ProtectionManager implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityExplode(EntityExplodeEvent event) {
         if (!config.isProtectionEnabled()) return;
-        event.blockList().removeIf(this::isProtectedContainer);
+        event.blockList().removeIf(this::isProtectedLootContainer);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockExplode(BlockExplodeEvent event) {
         if (!config.isProtectionEnabled()) return;
-        event.blockList().removeIf(this::isProtectedContainer);
+        event.blockList().removeIf(this::isProtectedLootContainer);
     }
 
-    private boolean isProtectedContainer(Block block) {
-        if (!config.getEnabledContainerTypes().contains(block.getType())) return false;
+    private boolean isProtectedLootContainer(Block block) {
+        if (!config.getEnabledContainerTypes().contains(block.getType())) {
+            return false;
+        }
 
         BlockState state = block.getState();
-        if (!(state instanceof Container)) return false;
+        if (!(state instanceof Container)) {
+            return false;
+        }
 
-        // A container is protected if it's not player-placed AND (it has a loot table OR has been captured)
-        boolean isPlayerPlaced = data.isPlayerPlaced(LocationUtil.getPrimaryLocation(block));
-        if (isPlayerPlaced) return false;
+        Location primaryLocation = LocationUtil.getPrimaryLocation(block);
 
+        // A container is NOT a loot container if the player placed it. This check is crucial.
+        // --- THIS IS THE FIX --- Removed the .join() call
+        if (data.isPlayerPlaced(primaryLocation)) {
+            return false;
+        }
+
+        // It's a loot container if it has a loot table...
         boolean hasLootTable = state instanceof Lootable lootable && lootable.getLootTable() != null;
-        boolean isCaptured = data.hasCapturedLoot(LocationUtil.getPrimaryLocation(block));
+        if (hasLootTable) {
+            return true;
+        }
 
-        return hasLootTable || isCaptured;
+        // ...or if it's a pre-filled chest that the plugin has captured.
+        // --- THIS IS THE FIX --- Removed the .join() call
+        return data.hasCapturedLoot(primaryLocation);
     }
 }
 

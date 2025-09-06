@@ -7,7 +7,6 @@ import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 public class DataManager {
 
@@ -31,14 +30,16 @@ public class DataManager {
         sqliteManager.setPlayerRecord(location, playerUUID, record);
     }
 
-    public long getRemainingCooldown(long lastLootTime) {
-        if (lastLootTime == 0) {
-            return 0;
-        }
-        long cooldownMillis = configManager.getRefreshIntervalMillis();
-        long elapsedTime = System.currentTimeMillis() - lastLootTime;
-        return Math.max(0, cooldownMillis - elapsedTime);
+    /**
+     * Updates only the contents of an existing player loot record, preserving the original timestamp.
+     * @param location The location of the container.
+     * @param playerUUID The UUID of the player.
+     * @param contents The new contents to save.
+     */
+    public void updatePlayerRecordContents(Location location, UUID playerUUID, ItemStack[] contents) {
+        sqliteManager.updatePlayerRecordContents(location, playerUUID, contents);
     }
+
 
     // --- Captured Loot Template Methods ---
 

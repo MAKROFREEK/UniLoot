@@ -2,10 +2,10 @@ package net.smaa.uniloot.managers;
 
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.smaa.uniloot.UniLoot;
 import net.smaa.uniloot.utils.FallbackLootItem;
 import net.smaa.uniloot.utils.PlayerLootRecord;
 import net.smaa.uniloot.utils.LocationUtil;
-import net.smaa.uniloot.UniLoot;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -40,10 +40,8 @@ public class LootManager implements Listener {
     private final ConfigManager config;
     private final DataManager data;
     private final Random random = new Random();
-
-    // Tracks which player is currently viewing which loot container inventory
-    // This is crucial for saving the correct inventory contents when it's closed.
-    private final Map<UUID, Location> openLootInventories = new HashMap<>();
+    // This map now only tracks which players have a UniLoot inventory open, for the close event.
+    private final Map<UUID, Boolean> openLootInventories = new HashMap<>();
 
     public LootManager(UniLoot plugin, ConfigManager configManager, DataManager dataManager) {
         this.plugin = plugin;
@@ -58,29 +56,98 @@ public class LootManager implements Listener {
         Block block = event.getClickedBlock();
         if (block == null || !config.getEnabledContainerTypes().contains(block.getType())) return;
 
-        Location primaryLocation = LocationUtil.getPrimaryLocation(block);
         Player player = event.getPlayer();
-        UUID playerUUID = player.getUniqueId();
+        Location primaryLocation = LocationUtil.getPrimaryLocation(block);
 
-        // Immediately ignore any blocks marked as player-placed to protect storage.
         if (data.isPlayerPlaced(primaryLocation)) {
-            return;
+            return; // This is a normal player chest, do nothing.
         }
 
+        handleLootInteraction(player, block, primaryLocation, event);
+    }
+
+    private void handleLootInteraction(Player player, Block block, Location primaryLocation, PlayerInteractEvent event) {
         BlockState state = block.getState();
         if (!(state instanceof Container)) return;
 
-        PlayerLootRecord record = data.getPlayerRecord(primaryLocation, playerUUID);
-        long lastLootTime = (record != null) ? record.getTimestamp() : 0;
-        long remainingCooldown = data.getRemainingCooldown(lastLootTime);
+        PlayerLootRecord record = data.getPlayerRecord(primaryLocation, player.getUniqueId());
 
-        // CASE 1: Player has a record and is on cooldown -> Show them their saved loot.
-        if (config.isRefreshEnabled() && remainingCooldown > 0) {
+        long now = System.currentTimeMillis();
+        long cooldown = config.isRefreshEnabled() ? config.getRefreshIntervalMillis() : -1;
+        boolean shouldGenerateNewLoot = true;
+
+        if (record != null) {
+            long timeSinceLooted = now - record.getTimestamp();
+            if (cooldown == -1 || timeSinceLooted < cooldown) {
+                shouldGenerateNewLoot = false;
+            }
+        }
+
+        if (shouldGenerateNewLoot) {
+            if (canGenerateLoot(state, primaryLocation)) {
+                event.setCancelled(true);
+                generateNewLootAndOpen(player, (Container) state, primaryLocation);
+            }
+        } else {
             event.setCancelled(true);
+            openSavedLoot(player, record, (Container) state, primaryLocation);
+        }
+    }
 
-            // Send the cooldown message before opening the inventory.
-            String messageTemplate = config.getLootOnCooldownMessage();
-            if (!messageTemplate.isEmpty()) {
+    private boolean canGenerateLoot(BlockState state, Location location) {
+        if (state instanceof Lootable lootable && lootable.getLootTable() != null) return true;
+        if (state instanceof Container container && !isInventoryEmpty(container.getInventory())) return true;
+        return data.hasCapturedLoot(location);
+    }
+
+    private void generateNewLootAndOpen(Player player, Container container, Location location) {
+        ItemStack[] generatedContents = generateLootContents(container, location, player);
+        if (generatedContents == null) return; // Should not happen if canGenerateLoot is true
+
+        // --- NEW LOGIC: Create and save the record immediately ---
+        PlayerLootRecord newRecord = new PlayerLootRecord(System.currentTimeMillis(), generatedContents);
+        data.setPlayerRecord(location, player.getUniqueId(), newRecord);
+
+        openPlayerInventory(player, container, newRecord.getContents());
+        player.sendMessage(MiniMessage.miniMessage().deserialize(config.getFirstLootMessage()));
+    }
+
+    private ItemStack[] generateLootContents(Container container, Location location, Player player) {
+        BlockState state = location.getBlock().getState();
+        Inventory tempInventory = Bukkit.createInventory(null, container.getInventory().getSize());
+
+        if (state instanceof Lootable lootable && lootable.getLootTable() != null) {
+            LootContext.Builder lootContextBuilder = new LootContext.Builder(location).lootedEntity(player);
+            lootable.getLootTable().fillInventory(tempInventory, random, lootContextBuilder.build());
+            if (isInventoryEmpty(tempInventory) && config.isFallbackLootEnabled()) {
+                populateWithFallbackLoot(tempInventory);
+            }
+            return tempInventory.getContents();
+        }
+
+        ItemStack[] capturedItems = data.getCapturedLoot(location);
+        if (capturedItems != null && capturedItems.length > 0) {
+            return capturedItems;
+        }
+
+        if (!isInventoryEmpty(container.getInventory())) {
+            data.captureLoot(location, container.getInventory().getContents());
+            if (config.isDebugMode()) {
+                plugin.getLogger().info("Captured new pre-filled loot at: " + LocationUtil.locationToString(location));
+            }
+            return container.getInventory().getContents();
+        }
+        return null;
+    }
+
+
+    private void openSavedLoot(Player player, PlayerLootRecord record, Container container, Location location) {
+        openPlayerInventory(player, container, record.getContents());
+
+        if (config.isRefreshEnabled()) {
+            long remainingCooldown = (record.getTimestamp() + config.getRefreshIntervalMillis()) - System.currentTimeMillis();
+            if (remainingCooldown > 0) {
+                String messageTemplate = config.getLootOnCooldownMessage();
                 long hours = TimeUnit.MILLISECONDS.toHours(remainingCooldown);
                 long minutes = TimeUnit.MILLISECONDS.toMinutes(remainingCooldown) % 60;
                 long seconds = TimeUnit.MILLISECONDS.toSeconds(remainingCooldown) % 60;
@@ -91,107 +158,34 @@ public class LootManager implements Listener {
                         Placeholder.unparsed("seconds", String.valueOf(seconds))
                 ));
             }
-
-            openSavedPlayerLoot(player, record, (Container) state, primaryLocation);
-            return;
         }
+    }
 
-        // CASE 2: Player has a permanent record (refresh disabled) -> Show them their saved loot.
-        if (!config.isRefreshEnabled() && record != null) {
-            event.setCancelled(true);
-            openSavedPlayerLoot(player, record, (Container) state, primaryLocation);
-            return;
-        }
-
-        // CASE 3: Cooldown expired or it's their first time looting -> Generate new loot.
-        event.setCancelled(true);
-        generateNewLoot(player, (Container) state, primaryLocation);
+    private void openPlayerInventory(Player player, Container container, ItemStack[] contents) {
+        Inventory lootInventory = Bukkit.createInventory(null, container.getInventory().getSize(), config.getInventoryTitle());
+        lootInventory.setContents(contents);
+        player.openInventory(lootInventory);
+        openLootInventories.put(player.getUniqueId(), true);
     }
 
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
-        if (!(event.getPlayer() instanceof Player)) return;
         Player player = (Player) event.getPlayer();
         UUID playerUUID = player.getUniqueId();
 
-        // If the player who closed the inventory was viewing one of our loot containers...
         if (openLootInventories.containsKey(playerUUID)) {
-            Location lootedLocation = openLootInventories.get(playerUUID);
-            PlayerLootRecord record = data.getPlayerRecord(lootedLocation, playerUUID);
-
-            // This check is crucial. We only save if the inventory title matches.
-            // It ensures we don't accidentally overwrite loot data when a player closes a different GUI.
-            if (record != null && event.getView().title().equals(config.getInventoryTitle())) {
-                // Save the player's modified inventory back to their record.
-                record.setContents(event.getInventory().getContents());
-                data.setPlayerRecord(lootedLocation, playerUUID, record);
-            }
             openLootInventories.remove(playerUUID);
+            if (event.getView().title().equals(config.getInventoryTitle())) {
+                // --- NEW LOGIC: Only update the contents, don't change the timestamp ---
+                Location location = player.getTargetBlock(null, 5).getLocation(); // A reasonable guess
+                data.updatePlayerRecordContents(LocationUtil.getPrimaryLocation(location.getBlock()), playerUUID, event.getInventory().getContents());
+            }
         }
     }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        // Clean up the map if a player logs out while a loot inventory is open.
         openLootInventories.remove(event.getPlayer().getUniqueId());
-    }
-
-    private void openSavedPlayerLoot(Player player, PlayerLootRecord record, Container container, Location location) {
-        Inventory lootInventory = Bukkit.createInventory(null, container.getInventory().getSize(), config.getInventoryTitle());
-        if (record.getContents() != null) {
-            lootInventory.setContents(record.getContents());
-        }
-        player.openInventory(lootInventory);
-        // Track that this player is now viewing this specific loot inventory.
-        openLootInventories.put(player.getUniqueId(), location);
-    }
-
-    private void generateNewLoot(Player player, Container container, Location location) {
-        BlockState state = container.getBlock().getState();
-        ItemStack[] newLootContents;
-
-        // PATH 1: Standard Loot Table (Vanilla, most plugins)
-        if (state instanceof Lootable lootable && lootable.getLootTable() != null) {
-            Inventory tempInventory = Bukkit.createInventory(null, container.getInventory().getSize());
-            LootContext.Builder contextBuilder = new LootContext.Builder(location).lootedEntity(player);
-            lootable.getLootTable().fillInventory(tempInventory, new Random(), contextBuilder.build());
-
-            if (isInventoryEmpty(tempInventory) && config.isFallbackLootEnabled()) {
-                populateWithFallbackLoot(tempInventory);
-            }
-            newLootContents = tempInventory.getContents();
-        }
-        // PATH 2: Already Captured Pre-filled Loot
-        else if (data.hasCapturedLoot(location)) {
-            newLootContents = data.getCapturedLoot(location);
-        }
-        // PATH 3: New Pre-filled Loot (BetterStructures, Trial Chambers)
-        else if (!isInventoryEmpty(container.getInventory())) {
-            data.captureLoot(location, container.getInventory().getContents());
-            newLootContents = data.getCapturedLoot(location);
-             if (config.isDebugMode()) {
-                plugin.getLogger().info("Captured new pre-filled loot at: " + LocationUtil.locationToString(location));
-            }
-        } else {
-            return; // It's an empty, unknown container. Ignore it.
-        }
-
-        // Create a new record for the player with the generated loot.
-        PlayerLootRecord newRecord = new PlayerLootRecord(System.currentTimeMillis(), newLootContents);
-        data.setPlayerRecord(location, player.getUniqueId(), newRecord);
-
-        // Open the virtual inventory for the player.
-        Inventory lootInventory = Bukkit.createInventory(null, container.getInventory().getSize(), config.getInventoryTitle());
-        lootInventory.setContents(newLootContents);
-        player.openInventory(lootInventory);
-
-        // Track that this player is viewing this inventory.
-        openLootInventories.put(player.getUniqueId(), location);
-
-        // Send the "first loot" message.
-        if (!config.getFirstLootMessage().isEmpty()) {
-            player.sendMessage(MiniMessage.miniMessage().deserialize(config.getFirstLootMessage()));
-        }
     }
 
     private void populateWithFallbackLoot(Inventory inventory) {
@@ -201,14 +195,11 @@ public class LootManager implements Listener {
             if (chosenItem == null) continue;
             int amount = chosenItem.getMinAmount() + (chosenItem.getMaxAmount() > chosenItem.getMinAmount() ? random.nextInt(chosenItem.getMaxAmount() - chosenItem.getMinAmount() + 1) : 0);
             ItemStack itemStack = new ItemStack(chosenItem.getMaterial(), amount);
-
             if (usedSlots.size() >= inventory.getSize()) break;
-
             int slot;
             do {
                 slot = random.nextInt(inventory.getSize());
             } while (inventory.getItem(slot) != null && inventory.getItem(slot).getType() != Material.AIR);
-
             usedSlots.add(slot);
             inventory.setItem(slot, itemStack);
         }

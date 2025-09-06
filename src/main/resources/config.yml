@@ -40,7 +40,7 @@ protection:
 
   #  How many seconds a creative player has to break the container a second time to confirm.
   #Default: 10
-  creative_break_confirmation_seconds: 10
+  creative_break_confirmation_seconds: 3
 
 loot_refresh:
   #--- Loot Cooldown Settings ---
@@ -59,7 +59,7 @@ messages:
   first_loot: '<green>You found some loot!</green>'
   already_looted: '<red>You have already looted this container.</red>'
   # Placeholders: <hours>, <minutes>, <seconds>
-  loot_on_cooldown: '<gray>You can loot this again in <hours>h <minutes>m <seconds>s.</gray>'
+  loot_on_cooldown: '<red>You can loot this again in <hours>h <minutes>m <seconds>s.</red>'
   break_attempt_survival: '<red>This special container is protected and cannot be broken.</red>'
   # Placeholder: <time>
   break_warning_creative: '<yellow><bold>Warning!</bold> This is a protected loot container. Break it again within <time> seconds to permanently destroy it.</yellow>'
