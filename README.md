@@ -4,6 +4,14 @@ UniLoot provides **unique, per-player loot for all generated containers**, regar
 
 This is my first plugin of this scale, built to solve frustrations I had with other loot plugins. I wanted something lightweight, reliable, and fully compatible with anything else you throw at your server. (Yes, I used AI to help build it.)
 
+# WARNING 
+
+If you stumble across this and want to try it out, use "/unitloot scan" around players already placed containers (barrels/chests/etc)
+Figuring out a better method to sort this issue, but with my limited knowledge and skills this is how it is for now.
+For my small private server just a couple friends it's not issue, but I can see this being a bigger issue for.. bigger servers.
+
+# WARNING
+
 ---
 
 ## Features
