@@ -3,6 +3,7 @@
 UniLoot provides **unique, per-player loot for all generated containers**, regardless of other plugins, loot tables, or structures. No more shared chests, no more conflicts — every player gets their own loot.
 
 This is my first plugin of this scale, built to solve frustrations I had with other loot plugins. I wanted something lightweight, reliable, and fully compatible with anything else you throw at your server. (Yes, I used AI to help build it.)
+Stores data in a SQLite database so operations is super light weight robust & efficient.
 
 # WARNING 
 
