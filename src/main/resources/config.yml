@@ -25,6 +25,7 @@ general:
     - 'TRAPPED_CHEST'
     - 'BARREL'
     - 'SHULKER_BOX'
+    - 'ITEM_FRAME' # Keep enabled for elytras.
 
 protection:
   #--- Container Protection Settings ---
@@ -71,7 +72,7 @@ fallback_loot:
   #  Set to true to generate loot if a container's natural loot table generates nothing.
   #  This ensures players always get something for exploring.
   #Default: true
-  enabled: true
+  enabled: false
 
   #  The number of random item stacks to generate from the list below if fallback is triggered.
   #Default: 3

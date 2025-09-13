@@ -12,6 +12,7 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Container;
+import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -40,8 +41,8 @@ public class LootManager implements Listener {
     private final ConfigManager config;
     private final DataManager data;
     private final Random random = new Random();
-    // This map now only tracks which players have a UniLoot inventory open, for the close event.
-    private final Map<UUID, Boolean> openLootInventories = new HashMap<>();
+    // This map now tracks which players have a UniLoot inventory open, the original contents, and the location.
+    private final Map<UUID, OpenInventoryData> openLootInventories = new HashMap<>();
 
     public LootManager(UniLoot plugin, ConfigManager configManager, DataManager dataManager) {
         this.plugin = plugin;
@@ -55,6 +56,14 @@ public class LootManager implements Listener {
 
         Block block = event.getClickedBlock();
         if (block == null || !config.getEnabledContainerTypes().contains(block.getType())) return;
+
+        // Handle Elytra Item Frame
+        if (block.getType() == Material.ITEM_FRAME) {
+            if (block instanceof ItemFrame) {
+                handleElytraItemFrameInteraction(event.getPlayer(), (ItemFrame) block, event.getClickedBlock().getLocation(), event);
+                return;
+            }
+        }
 
         Player player = event.getPlayer();
         Location primaryLocation = LocationUtil.getPrimaryLocation(block);
@@ -92,6 +101,78 @@ public class LootManager implements Listener {
             event.setCancelled(true);
             openSavedLoot(player, record, (Container) state, primaryLocation);
         }
+    }
+
+    private void handleElytraItemFrameInteraction(Player player, ItemFrame itemFrame, Location location, PlayerInteractEvent event) {
+        // Prevent the item frame from being broken
+        if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
+            event.setCancelled(true);
+            player.sendMessage(MiniMessage.miniMessage().deserialize(config.getBreakAttemptSurvivalMessage()));
+            return;
+        }
+
+        // Check if the player already has an elytra
+        if (data.hasPlayerObtainedElytra(player.getUniqueId())) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize(config.getAlreadyLootedMessage()));
+            event.setCancelled(true);
+            return;
+        }
+
+        // Check if the item frame is empty
+        if (itemFrame.getItem() == null || itemFrame.getItem().getType() == Material.AIR) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize("<red>This item frame is empty.</red>"));
+            event.setCancelled(true);
+            return;
+        }
+
+        // Give the player the item
+        ItemStack item = itemFrame.getItem().clone();
+        player.getInventory().addItem(item);
+
+        // Mark that the player has obtained an elytra
+        data.setPlayerObtainedElytra(player.getUniqueId());
+
+        // Reset the timer
+        data.resetPlayerElytraTimer(player.getUniqueId());
+
+        if (config.isRefreshEnabled()) {
+            long remainingCooldown = (data.getPlayerRecord(location, player.getUniqueId()).getTimestamp() + config.getRefreshIntervalMillis()) - System.currentTimeMillis();
+            if (remainingCooldown > 0) {
+                String messageTemplate = config.getLootOnCooldownMessage();
+                long hours = TimeUnit.MILLISECONDS.toHours(remainingCooldown);
+                long minutes = TimeUnit.MILLISECONDS.toMinutes(remainingCooldown) % 60;
+                long seconds = TimeUnit.MILLISECONDS.toSeconds(remainingCooldown) % 60;
+
+                player.sendMessage(MiniMessage.miniMessage().deserialize(messageTemplate,
+                        Placeholder.unparsed("hours", String.valueOf(hours)),
+                        Placeholder.unparsed("minutes", String.valueOf(minutes)),
+                        Placeholder.unparsed("seconds", String.valueOf(seconds))
+                ));
+            }
+        }
+
+        // Replenish the item frame
+        ItemStack elytra = new ItemStack(Material.ELYTRA);
+        itemFrame.setItem(elytra);
+
+        player.sendMessage(MiniMessage.miniMessage().deserialize(config.getFirstLootMessage()));
+        event.setCancelled(true);
+    }
+
+    private void spawnElytraItemFrame(Block block) {
+        // Implementation for spawning the item frame with an elytra
+        Location location = block.getLocation();
+        // Remove the existing item frame
+        block.setType(Material.AIR);
+
+        // Create a new item frame
+        org.bukkit.entity.ItemFrame itemFrame = location.getWorld().spawn(location, org.bukkit.entity.ItemFrame.class);
+
+        // Create an elytra item
+        ItemStack elytra = new ItemStack(Material.ELYTRA);
+
+        // Set the elytra in the item frame
+        itemFrame.setItem(elytra);
     }
 
     private boolean canGenerateLoot(BlockState state, Location location) {
@@ -133,7 +214,7 @@ public class LootManager implements Listener {
         if (!isInventoryEmpty(container.getInventory())) {
             data.captureLoot(location, container.getInventory().getContents());
             if (config.isDebugMode()) {
-                plugin.getLogger().info("Captured new pre-filled loot at: " + LocationUtil.locationToString(location));
+                plugin.getLogger().info("Captured new pre-filled loot at: " + LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ()));
             }
             return container.getInventory().getContents();
         }
@@ -165,7 +246,14 @@ public class LootManager implements Listener {
         Inventory lootInventory = Bukkit.createInventory(null, container.getInventory().getSize(), config.getInventoryTitle());
         lootInventory.setContents(contents);
         player.openInventory(lootInventory);
-        openLootInventories.put(player.getUniqueId(), true);
+        // Store a copy of the initial contents and the location
+        ItemStack[] initialContents = new ItemStack[contents.length];
+        for (int i = 0; i < contents.length; i++) {
+            if (contents[i] != null) {
+                initialContents[i] = contents[i].clone();
+            }
+        }
+        openLootInventories.put(player.getUniqueId(), new OpenInventoryData(initialContents, container.getLocation()));
     }
 
     @EventHandler
@@ -173,15 +261,66 @@ public class LootManager implements Listener {
         Player player = (Player) event.getPlayer();
         UUID playerUUID = player.getUniqueId();
 
-        if (openLootInventories.containsKey(playerUUID)) {
-            openLootInventories.remove(playerUUID);
-            if (event.getView().title().equals(config.getInventoryTitle())) {
-                // --- NEW LOGIC: Only update the contents, don't change the timestamp ---
-                Location location = player.getTargetBlock(null, 5).getLocation(); // A reasonable guess
-                data.updatePlayerRecordContents(LocationUtil.getPrimaryLocation(location.getBlock()), playerUUID, event.getInventory().getContents());
+        synchronized (openLootInventories) {
+            if (openLootInventories.containsKey(playerUUID)) {
+                OpenInventoryData openInventoryData = openLootInventories.get(playerUUID);
+                if (openInventoryData != null) {
+                    openLootInventories.remove(playerUUID);
+
+                    if (event.getView().title().equals(config.getInventoryTitle())) {
+                        ItemStack[] currentContents = event.getInventory().getContents();
+                        if (!areInventoriesEqual(openInventoryData.getInitialContents(), currentContents)) {
+                            // --- NEW LOGIC: Update the contents and timestamp only if the inventory changed ---
+                            Location location = openInventoryData.getLocation();
+                            Location primaryLocation = LocationUtil.getPrimaryLocation(location.getBlock());
+                            PlayerLootRecord record = new PlayerLootRecord(System.currentTimeMillis(), currentContents);
+                            data.setPlayerRecord(primaryLocation, playerUUID, record);
+                        }
+                    }
+                }
             }
         }
     }
+
+    private boolean areInventoriesEqual(ItemStack[] a, ItemStack[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+
+        for (int i = 0; i < a.length; i++) {
+            ItemStack itemA = a[i];
+            ItemStack itemB = b[i];
+
+            if (itemA == null && itemB == null) {
+                continue;
+            }
+
+            if (itemA == null || itemB == null) {
+                return false;
+            }
+
+            if (!itemA.equals(itemB)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // @EventHandler
+    // public void onInventoryClose(InventoryCloseEvent event) {
+    //     Player player = (Player) event.getPlayer();
+    //     UUID playerUUID = player.getUniqueId();
+
+    //     if (openLootInventories.containsKey(playerUUID)) {
+    //         openLootInventories.remove(playerUUID);
+    //         if (event.getView().title().equals(config.getInventoryTitle())) {
+    //             // --- NEW LOGIC: Only update the contents, don't change the timestamp ---
+    //             Location location = player.getTargetBlock(null, 5).getLocation(); // A reasonable guess
+    //             data.updatePlayerRecordContents(LocationUtil.getPrimaryLocation(location.getBlock()), playerUUID, event.getInventory().getContents());
+    //         }
+    //     }
+    // }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
@@ -222,4 +361,3 @@ public class LootManager implements Listener {
         return true;
     }
 }
-

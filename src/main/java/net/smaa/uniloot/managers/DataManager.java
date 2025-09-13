@@ -4,6 +4,7 @@ import net.smaa.uniloot.UniLoot;
 import net.smaa.uniloot.managers.SQLiteManager;
 import net.smaa.uniloot.utils.PlayerLootRecord;
 import org.bukkit.Location;
+import net.smaa.uniloot.utils.LocationUtil;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.UUID;
@@ -74,5 +75,16 @@ public class DataManager {
     public void clearAllDataForLocation(Location location) {
         sqliteManager.clearAllDataForLocation(location);
     }
-}
 
+    public boolean hasPlayerObtainedElytra(UUID playerUUID) {
+        return sqliteManager.hasPlayerObtainedElytra(playerUUID);
+    }
+
+    public void setPlayerObtainedElytra(UUID playerUUID) {
+        sqliteManager.setPlayerObtainedElytra(playerUUID);
+    }
+
+    public void resetPlayerElytraTimer(UUID playerUUID) {
+        sqliteManager.resetPlayerElytraTimer(playerUUID);
+    }
+}

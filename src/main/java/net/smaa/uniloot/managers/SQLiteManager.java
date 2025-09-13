@@ -77,10 +77,16 @@ public class SQLiteManager {
                 "location_key TEXT PRIMARY KEY" +
                 ");";
 
+        String createElytraDataTable = "CREATE TABLE IF NOT EXISTS elytra_data (" +
+                "player_uuid TEXT PRIMARY KEY," +
+                "timestamp BIGINT NOT NULL" +
+                ");";
+
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createPlayerDataTable);
             stmt.execute(createCapturedLootTable);
             stmt.execute(createPlayerPlacedTable);
+            stmt.execute(createElytraDataTable);
             plugin.getLogger().info("Database tables verified and ready.");
         } catch (SQLException e) {
             plugin.getLogger().severe("Could not create database tables: " + e.getMessage());
@@ -88,7 +94,7 @@ public class SQLiteManager {
     }
 
     public PlayerLootRecord getPlayerRecord(Location location, UUID playerUUID) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "SELECT timestamp, contents FROM player_data WHERE location_key = ? AND player_uuid = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -107,7 +113,7 @@ public class SQLiteManager {
     }
 
     public void setPlayerRecord(Location location, UUID playerUUID, PlayerLootRecord record) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "INSERT OR REPLACE INTO player_data (location_key, player_uuid, timestamp, contents) VALUES (?, ?, ?, ?)";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -121,7 +127,7 @@ public class SQLiteManager {
     }
 
     public void updatePlayerRecordContents(Location location, UUID playerUUID, ItemStack[] contents) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "UPDATE player_data SET contents = ? WHERE location_key = ? AND player_uuid = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, SerializationUtil.itemStackArrayToBase64(contents));
@@ -134,7 +140,7 @@ public class SQLiteManager {
     }
 
     public boolean hasCapturedLoot(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "SELECT 1 FROM captured_loot WHERE location_key = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -146,7 +152,7 @@ public class SQLiteManager {
     }
 
     public void captureLoot(Location location, ItemStack[] items) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "INSERT OR IGNORE INTO captured_loot (location_key, contents) VALUES (?, ?)";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -158,7 +164,7 @@ public class SQLiteManager {
     }
 
     public ItemStack[] getCapturedLoot(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "SELECT contents FROM captured_loot WHERE location_key = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -173,7 +179,7 @@ public class SQLiteManager {
     }
 
     public void addPlayerPlaced(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "INSERT OR IGNORE INTO player_placed_blocks (location_key) VALUES (?)";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -184,7 +190,7 @@ public class SQLiteManager {
     }
 
     public void removePlayerPlaced(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "DELETE FROM player_placed_blocks WHERE location_key = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -195,7 +201,7 @@ public class SQLiteManager {
     }
 
     public boolean isPlayerPlaced(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String sql = "SELECT 1 FROM player_placed_blocks WHERE location_key = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, locationKey);
@@ -207,7 +213,7 @@ public class SQLiteManager {
     }
 
     public void clearAllDataForLocation(Location location) {
-        String locationKey = LocationUtil.locationToString(location);
+        String locationKey = LocationUtil.locationToString(location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
         String deletePlayerDataSQL = "DELETE FROM player_data WHERE location_key = ?";
         String deleteCapturedLootSQL = "DELETE FROM captured_loot WHERE location_key = ?";
         String deletePlayerPlacedSQL = "DELETE FROM player_placed_blocks WHERE location_key = ?";
@@ -226,6 +232,13 @@ public class SQLiteManager {
 
                 pstmt3.setString(1, locationKey);
                 pstmt3.executeUpdate();
+
+            }
+            
+            String sql = "DELETE FROM elytra_data WHERE player_uuid IN (SELECT player_uuid FROM player_data WHERE location_key = ?)";
+            try (PreparedStatement pstmt4 = connection.prepareStatement(sql)) {
+                pstmt4.setString(1, locationKey);
+                pstmt4.executeUpdate();
             }
             connection.commit();
         } catch (SQLException e) {
@@ -243,5 +256,39 @@ public class SQLiteManager {
             }
         }
     }
-}
 
+    public boolean hasPlayerObtainedElytra(UUID playerUUID) {
+        String sql = "SELECT 1 FROM elytra_data WHERE player_uuid = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, playerUUID.toString());
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Database error checking if player has obtained elytra: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public void setPlayerObtainedElytra(UUID playerUUID) {
+        String sql = "INSERT OR IGNORE INTO elytra_data (player_uuid, timestamp) VALUES (?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, playerUUID.toString());
+            pstmt.setLong(2, System.currentTimeMillis());
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Database error setting player obtained elytra: " + e.getMessage());
+        }
+    }
+
+    public void resetPlayerElytraTimer(UUID playerUUID) {
+        String sql = "UPDATE elytra_data SET timestamp = ? WHERE player_uuid = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, System.currentTimeMillis());
+            pstmt.setString(2, playerUUID.toString());
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Database error resetting player elytra timer: " + e.getMessage());
+        }
+    }
+}
